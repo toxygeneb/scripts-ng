@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+
+# ===========================================================================
+# Description: Make ISO image file of optical disk
+# Author: Björn Ballard <bjorn.ballard@gmail.com>
+# URL: https://github.com/toxygeneb/scripts-ng
+# License: GPL 2.0
+# Date: 2017-01-06
+# Version: 0.2
+# ===========================================================================
+
+set -o errexit
+set -o pipefail
+
+E_SUCCESS=0       # Images created successfully
+E_ROOT=85         # Root exit error
+E_MISSINGDEP=86   # Missing dependency error
+E_SOURCEDEV=87    # Source drive error
+E_WRONGARGS=88    # Wrong number of arguments error
+E_BLOCKSIZE=89    # Source blocksize error
+E_VOLUMESIZE=90   # Source volume size error
+E_IMAGE=91        # Creating ISO image error
+
+ROOT_UID=0
+SOURCE_DEVICE=/dev/sr0
+SCRIPT_DEPS=(date isoinfo grep cut)
+DEP_ERRORS=0
+
+# Do not run as root, of course
+if [[ ${UID} -eq ${ROOT_UID} ]]; then
+  echo "Must not be root to run this script." >&2
+  exit ${E_ROOT}
+fi
+
+# Check dependencies
+for i in ${SCRIPT_DEPS[@]}; do
+  if ! [[ -x "$(command -v ${i})" ]]; then
+    echo "Missing dependency: ${i}." >&2
+    ((DEP_ERRORS++))
+  fi
+done
+if [[ ${DEP_ERRORS} -gt 0 ]]; then
+  exit ${E_MISSINGDEP}
+fi
+
+# Check source block device exists.
+if ! [[ -b ${SOURCE_DEVICE} ]]; then
+  echo "Source block device error." >&2
+  exit ${E_SOURCEDEV}
+fi
+
+# Check number of arguments
+if [[ ${#} -gt 1 ]]; then
+  echo "Too many command line arguments." >&2
+  exit ${E_WRONGARGS}
+fi
+
+# If no output file specified in $1 use datetime stamp
+if [ -z $1 ]
+then
+    IMAGE_FILE=${HOME}/`date +%Y%m%d%H%M%S`.iso
+else
+    IMAGE_FILE=${HOME}/${1}
+fi
+
+# Get and check source blocksize
+BLOCK_SIZE=`isoinfo -d -i ${SOURCE_DEVICE} | grep "^Logical block size is:" | cut -d " " -f 5`
+if [[ "${BLOCK_SIZE}" = "" ]]; then
+    echo "Source blocksize error." &>2
+    exit ${E_BLOCKSIZE}
+fi
+
+# Get and check source volume size
+VOLUME_SIZE=`isoinfo -d -i ${SOURCE_DEVICE} | grep "^Volume size is:" | cut -d " " -f 4`
+if [[ "${VOLUME_SIZE}" = "" ]]; then
+    echo "Source volume size error." &>2
+    exit ${E_VOLUMESIZE}
+fi
+
+# Attempt to create the ISO image
+dd if=${SOURCE_DEVICE} of=${IMAGE_FILE} bs=${BLOCK_SIZE} count=${VOLUME_SIZE}
+if [[ $? -eq 0 ]]; then
+  echo "ISO image file created: ${IMAGE_FILE}."
+  exit ${E_SUCCESS}
+else
+  echo "ISO image file creation failed." >&2
+  exit ${E_IMAGE}
+fi
